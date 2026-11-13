@@ -445,7 +445,11 @@
       body:JSON.stringify({ model, messages, usage:{include:true} })
     });
     const j = await r.json().catch(()=>({}));
-    if(!r.ok || j.error) throw new Error(j.error?.message || ("HTTP "+r.status));
+    if(!r.ok || j.error){
+      let msg = j.error?.message || ("HTTP "+r.status);
+      if(r.status===401) msg += " (OpenRouter не принял ключ для запросов к моделям: создайте новый обычный API Key на openrouter.ai/keys)";
+      throw new Error(msg);
+    }
     const text = j.choices?.[0]?.message?.content || "";
     const u = j.usage||{};
     let cost = typeof u.cost==="number" ? u.cost : null;
@@ -766,9 +770,13 @@ ${block}
       if(r.status===404) r = await fetch(API+"/auth/key",{headers:{Authorization:"Bearer "+v}});
       if(v!==cleanKey()) return;
       if(r.ok){
-        const d=(await r.json().catch(()=>({}))).data||{};
-        const left = typeof d.limit_remaining==="number" ? " · остаток $"+d.limit_remaining.toFixed(2) : "";
-        el.textContent="● ключ рабочий"+left; el.className="keystate ok";
+        const d=(await r.json().catch(()=>({}))).data;
+        const bad = t=>{ el.textContent="✕ "+t; el.className="keystate"; el.style.color="var(--warn)"; };
+        if(!d || !d.label){ bad("OpenRouter не подтвердил ключ"); return; }
+        if(d.is_management_key || d.is_provisioning_key){ bad("это Management-ключ, он не подходит — нужен обычный API Key"); return; }
+        if(d.expires_at && new Date(d.expires_at) < new Date()){ bad("срок действия ключа истёк"); return; }
+        const left = typeof d.limit_remaining==="number" ? " · лимит ключа: осталось $"+d.limit_remaining.toFixed(2) : "";
+        el.textContent="● ключ рабочий · "+d.label+left+(d.is_free_tier?" · счёт не пополнялся":""); el.className="keystate ok";
       } else {
         el.textContent="✕ OpenRouter не узнаёт ключ · "+v.length+" симв."; el.className="keystate"; el.style.color="var(--warn)";
         return;
