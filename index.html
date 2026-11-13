@@ -83,6 +83,7 @@
   .keyrow .kin{flex:1;min-width:260px;position:relative}
   .keystate{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-family:var(--mono);font-size:11px;color:var(--dim)}
   .keystate.ok{color:#3ee6a0}
+  @media (max-width:600px){.keystate{position:static;transform:none;display:block;margin-top:6px}}
 
   /* toggles */
   .tgl{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--muted);user-select:none}
@@ -436,7 +437,7 @@
 
   // ---------- запросы ----------
   async function callModel(model, messages){
-    const key = $("key").value.trim();
+    const key = cleanKey();
     const t0 = performance.now();
     const r = await fetch(API+"/chat/completions",{
       method:"POST",
@@ -501,7 +502,7 @@
 
   async function ask(){
     const q = $("q").value.trim();
-    if(!$("key").value.trim()){ $("key").focus(); toast("Вставьте ключ OpenRouter"); return; }
+    if(!cleanKey()){ $("key").focus(); toast("Вставьте ключ OpenRouter"); return; }
     if(!q){ $("q").focus(); return; }
     const models = activeModels();
     if(models.length<2){ toast("Включите хотя бы две модели"); return; }
@@ -746,12 +747,34 @@ ${block}
   };
 
   // ---------- мелочи ----------
-  function persistKey(){ if($("rememberKey").checked) store.set("key",$("key").value.trim()); else store.del("key"); }
+  // ключ без пробелов, переносов и невидимых символов
+  function cleanKey(){ return $("key").value.replace(/[\s\u200B-\u200D\uFEFF\u00A0]+/g,""); }
+  function persistKey(){ if($("rememberKey").checked) store.set("key",cleanKey()); else store.del("key"); }
+  let keyTimer;
   function keyState(){
-    const v=$("key").value.trim(), el=$("keyState");
+    const v=cleanKey(), el=$("keyState");
+    clearTimeout(keyTimer);
     if(!v){ el.textContent="нет ключа"; el.className="keystate"; }
-    else if(/^sk-or-/.test(v)){ el.textContent="● ключ на месте"; el.className="keystate ok"; }
+    else if(/^sk-or-/.test(v)){ el.textContent="проверяю ключ…"; el.className="keystate"; keyTimer=setTimeout(()=>checkKey(v),700); }
     else { el.textContent="не похож на ключ OpenRouter"; el.className="keystate"; }
+  }
+  // спрашиваем у OpenRouter, узнаёт ли он этот ключ
+  async function checkKey(v){
+    const el=$("keyState");
+    try{
+      let r = await fetch(API+"/key",{headers:{Authorization:"Bearer "+v}});
+      if(r.status===404) r = await fetch(API+"/auth/key",{headers:{Authorization:"Bearer "+v}});
+      if(v!==cleanKey()) return;
+      if(r.ok){
+        const d=(await r.json().catch(()=>({}))).data||{};
+        const left = typeof d.limit_remaining==="number" ? " · остаток $"+d.limit_remaining.toFixed(2) : "";
+        el.textContent="● ключ рабочий"+left; el.className="keystate ok";
+      } else {
+        el.textContent="✕ OpenRouter не узнаёт ключ · "+v.length+" симв."; el.className="keystate"; el.style.color="var(--warn)";
+        return;
+      }
+      el.style.color="";
+    }catch(e){ el.textContent="● ключ на месте (проверка недоступна)"; el.className="keystate ok"; el.style.color=""; }
   }
   let tt; function toast(t){ const el=$("toast"); el.textContent=t; el.classList.add("show"); clearTimeout(tt); tt=setTimeout(()=>el.classList.remove("show"),2600); }
 
